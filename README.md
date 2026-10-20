@@ -110,6 +110,10 @@ jinjava.getGlobalContext().registerFunction(new ELFunctionDefinition("myfn", "my
 jinjava.getGlobalContext().registerClasses(Class<? extends Importable>... classes);
 ```
 
+### IP address and subnet filters
+
+See [IP address filters](IP_FILTERS.md) for Ansible-style address indexing, wildcard masks, `ipsubnet`, and `ipmath`, including compatibility notes for existing Jinjava templates.
+
 ### See also
 
  - [Javadocs](http://www.javadoc.io/doc/com.hubspot.jinjava/jinjava)

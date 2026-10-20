@@ -34,7 +34,7 @@ import org.apache.commons.net.util.SubnetUtils;
       value = "function",
       type = "string",
       defaultValue = "prefix",
-      desc = "Name of function. Supported functions: 'prefix', 'netmask', 'network', 'address', 'broadcast'"
+      desc = "Name of function. Supported functions: 'prefix', 'netmask', 'network', 'address', 'broadcast', numeric indexes, 'wildcard', 'host', 'subnet', 'size', 'peer', usable-address queries and CIDR containment"
     ),
   },
   snippets = {
@@ -73,18 +73,42 @@ public class IpAddrFilter implements Filter {
   private static final String GATEWAY_STRING = "gateway";
   private static final String PUBLIC_STRING = "public";
   private static final String PRIVATE_STRING = "private";
-  private static final String AVAILABLE_FUNCTIONS = Joiner
-    .on(", ")
-    .join(
-      PREFIX_STRING,
-      NETMASK_STRING,
-      ADDRESS_STRING,
-      BROADCAST_STRING,
-      NETWORK_STRING,
-      GATEWAY_STRING,
-      PUBLIC_STRING,
-      PRIVATE_STRING
+  private static final String AVAILABLE_FUNCTIONS = Joiner.on(", ").join(
+    PREFIX_STRING,
+    NETMASK_STRING,
+    ADDRESS_STRING,
+    BROADCAST_STRING,
+    NETWORK_STRING,
+    GATEWAY_STRING,
+    PUBLIC_STRING,
+    PRIVATE_STRING
+  );
+
+  @Override
+  public Object filter(
+    Object value,
+    JinjavaInterpreter interpreter,
+    Object[] args,
+    Map<String, Object> kwargs
+  ) {
+    if (kwargs.containsKey("function")) {
+      kwargs = new java.util.LinkedHashMap<>(kwargs);
+      if (kwargs.containsKey("query")) {
+        throw new InvalidArgumentException(
+          interpreter,
+          getName(),
+          "Duplicate query argument"
+        );
+      }
+      kwargs.put("query", kwargs.remove("function"));
+    }
+    String[] bound = IpFilterArguments.bind(this, interpreter, args, kwargs, "query");
+    return filter(
+      value instanceof com.hubspot.jinjava.objects.SafeString ? value.toString() : value,
+      interpreter,
+      bound
     );
+  }
 
   @Override
   public Object filter(Object object, JinjavaInterpreter interpreter, String... args) {
@@ -92,6 +116,13 @@ public class IpAddrFilter implements Filter {
       return false;
     }
 
+    if (args.length > 1) {
+      throw new InvalidArgumentException(
+        interpreter,
+        getName(),
+        "Expected at most one query"
+      );
+    }
     String parameter = getParameter(args);
     if (object instanceof Map) {
       return getMapOfFilteredItems(interpreter, parameter, object);
@@ -101,16 +132,33 @@ public class IpAddrFilter implements Filter {
       return getFilteredItems(interpreter, parameter, object);
     }
 
-    if (object instanceof String) {
+    if (
+      object instanceof String ||
+      (object instanceof Number && parameter != null && !isLegacyQuery(parameter))
+    ) {
       return getValue(interpreter, object, parameter);
     }
 
     return false;
   }
 
+  private boolean isLegacyQuery(String query) {
+    return (
+      StringUtils.isEmpty(query) ||
+      query.equals(PREFIX_STRING) ||
+      query.equals(NETMASK_STRING) ||
+      query.equals(ADDRESS_STRING) ||
+      query.equals(BROADCAST_STRING) ||
+      query.equals(NETWORK_STRING) ||
+      query.equals(GATEWAY_STRING) ||
+      query.equalsIgnoreCase(PUBLIC_STRING) ||
+      query.equalsIgnoreCase(PRIVATE_STRING)
+    );
+  }
+
   private String getParameter(String... args) {
     if (args.length > 0) {
-      return args[0].trim();
+      return args[0] == null ? null : args[0].trim();
     }
 
     return null;
@@ -166,12 +214,12 @@ public class IpAddrFilter implements Filter {
       return null;
     }
 
-    if (value instanceof String || value instanceof Integer) {
+    if (value instanceof String || value instanceof Number) {
       return String.valueOf(value);
     }
 
     if (value instanceof Boolean && (Boolean) value) {
-      return (String) item;
+      return String.valueOf(item);
     }
 
     return null;
@@ -182,6 +230,34 @@ public class IpAddrFilter implements Filter {
     Object object,
     String parameter
   ) {
+    if (parameter != null && !isLegacyQuery(parameter)) {
+      IpAddress ip;
+      try {
+        ip = IpAddress.parse(object);
+      } catch (IllegalArgumentException e) {
+        return null;
+      }
+      try {
+        if (
+          (getName().equals("ipv4") && ip.bits != 32) ||
+          (getName().equals("ipv6") && ip.bits != 128)
+        ) {
+          return null;
+        }
+        return new IpAddressQueries().query(ip, object, parameter);
+      } catch (NumberFormatException e) {
+        return null;
+      } catch (IllegalArgumentException e) {
+        throw new InvalidArgumentException(
+          interpreter,
+          this,
+          InvalidReason.ENUM,
+          1,
+          parameter,
+          AVAILABLE_FUNCTIONS
+        );
+      }
+    }
     if (!(object instanceof String)) {
       return null;
     }

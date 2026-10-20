@@ -72,6 +72,8 @@ public class FilterLibrary extends SimpleLibrary<Filter> {
       IntFilter.class,
       IntersectFilter.class,
       IpAddrFilter.class,
+      IpSubnetFilter.class,
+      IpMathFilter.class,
       Ipv4Filter.class,
       Ipv6Filter.class,
       JoinFilter.class,
